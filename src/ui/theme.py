@@ -88,6 +88,28 @@ QPushButton#MasterToggleButton[active="true"] {
     border: 2px solid #818cf8;
 }
 
+/* Test Button */
+QPushButton#TestButton {
+    background-color: #1e2230;
+    color: #94a3b8;
+    border: 2px solid #2d3348;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 700;
+    padding: 10px;
+}
+
+QPushButton#TestButton:hover {
+    border-color: #10b981;
+    color: #e2e8f0;
+}
+
+QPushButton#TestButton[active="true"] {
+    background-color: #065f46;
+    color: #ffffff;
+    border: 2px solid #10b981;
+}
+
 /* Group Boxes and Panels */
 QGroupBox {
     background-color: #161922;
@@ -276,6 +298,28 @@ QPushButton#MasterToggleButton[active="true"] {
     background-color: #4f46e5;
     color: #ffffff;
     border: 2px solid #3730a3;
+}
+
+/* Test Button */
+QPushButton#TestButton {
+    background-color: #1e2230;
+    color: #94a3b8;
+    border: 2px solid #2d3348;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 700;
+    padding: 10px;
+}
+
+QPushButton#TestButton:hover {
+    border-color: #10b981;
+    color: #e2e8f0;
+}
+
+QPushButton#TestButton[active="true"] {
+    background-color: #065f46;
+    color: #ffffff;
+    border: 2px solid #10b981;
 }
 
 /* Group Boxes and Panels */

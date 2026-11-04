@@ -10,7 +10,7 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QCloseEvent
 
 from src.audio.engine import AudioEngine
-from src.audio.devices import find_default_device
+from src.audio.devices import find_default_device, find_virtual_cable_output
 from src.dsp.presets import VoiceParams
 from src.ui.tabs_presets import PresetsTab
 from src.ui.tabs_advanced import AdvancedTab
@@ -18,6 +18,10 @@ from src.ui.dialog_settings import SettingsDialog
 from src.ui.vu_meter import VUMeter
 from src.ui.theme import apply_theme
 from src.utils.admin import is_admin, restart_as_admin
+from src.utils.virtual_cable import (
+    is_virtual_cable_installed, open_download_page, 
+    find_downloaded_setup, run_installer_from_path
+)
 from src.utils.tray import AppTrayIcon
 
 
@@ -27,9 +31,10 @@ class MainWindow(QMainWindow):
         self.engine = engine
         self.is_dark_theme = is_dark_theme
         self.is_voice_changing_active = False
+        self.is_test_active = False
 
         self.setWindowTitle("Voice Changer Pro - Изменение голоса в реальном времени")
-        self.resize(780, 680)
+        self.resize(800, 700)
 
         # Tray Icon
         self.tray = AppTrayIcon(self)
@@ -72,7 +77,25 @@ class MainWindow(QMainWindow):
             
             root_layout.addWidget(self.admin_banner)
 
-        # 2. Top Header Bar
+        # 2. Virtual Cable Notice (if cable not installed)
+        if not is_virtual_cable_installed():
+            self.cable_banner = QFrame()
+            self.cable_banner.setObjectName("AdminBanner")
+            c_layout = QHBoxLayout(self.cable_banner)
+            c_layout.setContentsMargins(10, 6, 10, 6)
+            
+            c_lbl = QLabel("ℹ️ Виртуальный аудиокабель не обнаружен. Установите его, чтобы голос менялся в Discord и играх.")
+            c_lbl.setStyleSheet("color: #0284c7; font-size: 12px; font-weight: 500;")
+            c_layout.addWidget(c_lbl)
+
+            btn_inst = QPushButton("Установить кабель в 1 клик")
+            btn_inst.setStyleSheet("background-color: #0284c7; color: white; padding: 4px 10px; font-size: 11px;")
+            btn_inst.clicked.connect(self._install_virtual_cable)
+            c_layout.addWidget(btn_inst)
+
+            root_layout.addWidget(self.cable_banner)
+
+        # 3. Top Header Bar
         top_bar = QHBoxLayout()
         top_bar.setSpacing(12)
 
@@ -99,7 +122,7 @@ class MainWindow(QMainWindow):
 
         root_layout.addLayout(top_bar)
 
-        # 3. Audio Level VU Meters
+        # 4. Audio Level VU Meters
         vu_box = QHBoxLayout()
         vu_box.setSpacing(16)
 
@@ -121,7 +144,7 @@ class MainWindow(QMainWindow):
         vu_box.addLayout(out_layout)
         root_layout.addLayout(vu_box)
 
-        # 4. Central Tabs
+        # 5. Central Tabs
         self.tabs = QTabWidget()
         
         self.presets_tab = PresetsTab()
@@ -134,21 +157,46 @@ class MainWindow(QMainWindow):
 
         root_layout.addWidget(self.tabs, stretch=1)
 
+        # 6. Bottom Test Bar ("Слышать себя")
+        bottom_bar = QHBoxLayout()
+        bottom_bar.setSpacing(12)
+
+        self.btn_test = QPushButton("🎧 ТЕСТ: Слышать себя (ВЫКЛ)")
+        self.btn_test.setObjectName("TestButton")
+        self.btn_test.setProperty("active", "false")
+        self.btn_test.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_test.setMinimumHeight(46)
+        self.btn_test.clicked.connect(self._toggle_test_mode)
+        bottom_bar.addWidget(self.btn_test, stretch=2)
+
+        lbl_test_hint = QLabel("Нажмите «Тест», чтобы услышать свой измененный голос в наушниках для проверки.")
+        lbl_test_hint.setStyleSheet("font-size: 11px; color: #94a3b8;")
+        lbl_test_hint.setWordWrap(True)
+        bottom_bar.addWidget(lbl_test_hint, stretch=3)
+
+        root_layout.addLayout(bottom_bar)
+
     def _init_audio(self):
         """Initializes default devices and starts audio engine."""
         def_in = find_default_device(is_input=True)
-        def_out = find_default_device(is_input=False)
+        def_headphone = find_default_device(is_input=False)
+        cable_out = find_virtual_cable_output()
 
         in_id = def_in.index if def_in else None
-        out_id = def_out.index if def_out else None
+        cable_id = cable_out.index if cable_out else None
+        headphone_id = def_headphone.index if def_headphone else None
 
         try:
-            self.engine.start(input_device_id=in_id, output_device_id=out_id)
+            self.engine.start(
+                input_device_id=in_id,
+                cable_output_device_id=cable_id,
+                headphone_device_id=headphone_id
+            )
         except Exception as e:
             QMessageBox.warning(
                 self, 
                 "Аудиоустройства", 
-                f"Не удалось подключиться к аудиоустройствам по умолчанию: {e}\nПожалуйста, выберите устройства в Настройках."
+                f"Не удалось подключиться к аудиоустройствам: {e}\nПожалуйста, выберите микрофон в Настройках."
             )
 
     def _toggle_voice_changing(self):
@@ -169,6 +217,21 @@ class MainWindow(QMainWindow):
         # Update tray
         self.tray.update_icon(self.is_voice_changing_active)
 
+    def _toggle_test_mode(self):
+        """Toggles headphone test monitoring."""
+        self.is_test_active = not self.is_test_active
+        self.engine.set_test_mode(self.is_test_active)
+
+        if self.is_test_active:
+            self.btn_test.setText("🔊 ТЕСТ: Слышите себя (ВКЛЮЧЕНО)")
+            self.btn_test.setProperty("active", "true")
+        else:
+            self.btn_test.setText("🎧 ТЕСТ: Слышать себя (ВЫКЛ)")
+            self.btn_test.setProperty("active", "false")
+
+        self.btn_test.style().unpolish(self.btn_test)
+        self.btn_test.style().polish(self.btn_test)
+
     def _on_params_changed(self, params: VoiceParams):
         self.engine.set_params(params)
 
@@ -184,9 +247,8 @@ class MainWindow(QMainWindow):
     def _open_settings(self):
         dlg = SettingsDialog(
             current_input_id=self.engine.input_device_id,
-            current_output_id=self.engine.output_device_id,
-            current_monitor_id=self.engine.monitor_device_id,
-            monitor_enabled=self.engine.monitor_enabled,
+            current_cable_id=self.engine.cable_output_device_id,
+            current_headphone_id=self.engine.headphone_device_id,
             buffer_size=self.engine.block_size,
             parent=self
         )
@@ -194,10 +256,35 @@ class MainWindow(QMainWindow):
             # Apply changes
             self.engine.block_size = dlg.buffer_size
             try:
-                self.engine.start(input_device_id=dlg.input_id, output_device_id=dlg.output_id)
-                self.engine.set_monitor(enabled=dlg.monitor_enabled, monitor_device_id=dlg.monitor_id)
+                self.engine.start(
+                    input_device_id=dlg.input_id,
+                    cable_output_device_id=dlg.cable_id,
+                    headphone_device_id=dlg.headphone_id
+                )
             except Exception as e:
                 QMessageBox.critical(self, "Ошибка аудио", f"Не удалось применить устройства: {e}")
+
+    def _install_virtual_cable(self):
+        found = find_downloaded_setup()
+        if found:
+            try:
+                run_installer_from_path(found)
+                QMessageBox.information(
+                    self, 
+                    "Установка запущена", 
+                    "В появившемся окне нажмите 'Install Driver'. После установки перезапустите приложение."
+                )
+                return
+            except Exception as e:
+                QMessageBox.critical(self, "Ошибка запуска", f"Не удалось запустить установщик: {e}")
+
+        # If not found locally, open official website
+        QMessageBox.information(
+            self, 
+            "Установка виртуального кабеля", 
+            "Сейчас откроется официальная страница VB-CABLE.\n1. Скачайте архив 'VBCABLE_Driver_Pack43.zip' (или Pack45)\n2. Распакуйте архив и запустите от администратора VBCABLE_Setup_x64.exe\n(или нажмите кнопку 'Запустить установщик' в программе)."
+        )
+        open_download_page()
 
     def _restart_as_admin(self):
         try:
@@ -214,7 +301,6 @@ class MainWindow(QMainWindow):
         QApplication.quit()
 
     def closeEvent(self, event: QCloseEvent):
-        # Minimize to tray on close
         if self.tray.isVisible():
             self.hide()
             self.tray.showMessage(
