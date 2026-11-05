@@ -7,7 +7,9 @@ from PySide6.QtWidgets import (
     QLabel, QComboBox, QPushButton, QGroupBox, QMessageBox
 )
 from PySide6.QtCore import QTimer
-from src.audio.devices import get_input_devices, get_output_devices, find_virtual_cable_output
+from src.audio.devices import (
+    get_input_devices, get_output_devices, find_virtual_cable_output, refresh_devices
+)
 from src.utils.virtual_cable import is_virtual_cable_installed, install_driver_silent
 
 
@@ -91,9 +93,9 @@ class SettingsDialog(QDialog):
         buf_group = QGroupBox("4. Задержка звука (Размер буфера)")
         buf_layout = QHBoxLayout(buf_group)
         self.buf_combo = QComboBox()
-        self.buf_combo.addItem("512 сэмплов (~11.6 мс, ультра-низкая задержка)", 512)
-        self.buf_combo.addItem("1024 сэмплов (~23.2 мс, сбалансировано)", 1024)
-        self.buf_combo.addItem("2048 сэмплов (~46.4 мс, максимальная стабильность)", 2048)
+        self.buf_combo.addItem("512 сэмплов (~10.7 мс, ультра-низкая задержка)", 512)
+        self.buf_combo.addItem("1024 сэмплов (~21.3 мс, сбалансировано)", 1024)
+        self.buf_combo.addItem("2048 сэмплов (~42.7 мс, максимальная стабильность)", 2048)
 
         for idx in range(self.buf_combo.count()):
             if self.buf_combo.itemData(idx) == self.buffer_size:
@@ -132,14 +134,14 @@ class SettingsDialog(QDialog):
 
     def _check_installed(self):
         self.poll_count += 1
-        if is_virtual_cable_installed():
+        refresh_devices()
+        cable_dev = find_virtual_cable_output()
+        if cable_dev is not None:
             self.poll_timer.stop()
             self.btn_install_cable.hide()
             self.lbl_cable_status.setText("✅ Виртуальный кабель успешно активирован!\nВ Discord или игре выберите микрофон: «CABLE Output».")
             self.lbl_cable_status.setStyleSheet("color: #22c55e; font-weight: 600;")
-            cable_dev = find_virtual_cable_output()
-            if cable_dev:
-                self.cable_id = cable_dev.index
+            self.cable_id = cable_dev.index
             QMessageBox.information(
                 self, 
                 "Успех", 

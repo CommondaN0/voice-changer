@@ -11,7 +11,9 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QCloseEvent
 
 from src.audio.engine import AudioEngine
-from src.audio.devices import find_default_device, find_virtual_cable_output
+from src.audio.devices import (
+    find_default_device, find_virtual_cable_output, refresh_devices
+)
 from src.dsp.presets import VoiceParams
 from src.ui.tabs_presets import PresetsTab
 from src.ui.tabs_advanced import AdvancedTab
@@ -193,11 +195,7 @@ class MainWindow(QMainWindow):
                 headphone_device_id=headphone_id
             )
         except Exception as e:
-            QMessageBox.warning(
-                self, 
-                "Аудиоустройства", 
-                f"Не удалось подключиться к аудиоустройствам: {e}\nПожалуйста, выберите микрофон в Настройках."
-            )
+            print(f"[MainWindow] Audio init note: {e}")
 
     def _toggle_voice_changing(self):
         self.is_voice_changing_active = not self.is_voice_changing_active
@@ -273,6 +271,9 @@ class MainWindow(QMainWindow):
         self.cable_lbl.setText("⏳ Установка драйвера... Пожалуйста, подтвердите системный запрос администратора (UAC).")
         self.cable_lbl.setStyleSheet("color: #0284c7; font-size: 12px; font-weight: 600;")
 
+        # Temporarily stop running audio streams so driver installation doesn't crash open streams
+        self.engine.stop()
+
         threading.Thread(target=install_driver_silent, daemon=True).start()
 
         self.cable_poll_count = 0
@@ -282,29 +283,39 @@ class MainWindow(QMainWindow):
 
     def _poll_cable_installation(self):
         self.cable_poll_count += 1
-        if is_virtual_cable_installed():
+        
+        # Rescan system devices via PortAudio
+        refresh_devices()
+
+        cable_dev = find_virtual_cable_output()
+        if cable_dev is not None:
             self.cable_poll_timer.stop()
             if hasattr(self, 'cable_banner') and self.cable_banner is not None:
                 self.cable_banner.hide()
 
-            cable_dev = find_virtual_cable_output()
-            if cable_dev is not None:
-                self.engine.cable_output_device_id = cable_dev.index
-                try:
-                    self.engine.start(
-                        input_device_id=self.engine.input_device_id,
-                        cable_output_device_id=cable_dev.index,
-                        headphone_device_id=self.engine.headphone_device_id
-                    )
-                except Exception:
-                    pass
+            # Retrieve updated devices
+            in_dev = find_default_device(is_input=True)
+            hp_dev = find_default_device(is_input=False)
+
+            in_id = in_dev.index if in_dev else None
+            cable_id = cable_dev.index
+            hp_id = hp_dev.index if hp_dev else None
+
+            try:
+                self.engine.start(
+                    input_device_id=in_id,
+                    cable_output_device_id=cable_id,
+                    headphone_device_id=hp_id
+                )
+            except Exception as e:
+                print(f"[MainWindow] Engine restart warning: {e}")
 
             QMessageBox.information(
                 self,
                 "Успех",
                 "Виртуальный аудиокабель успешно активирован и подключен!\n\n"
                 "Теперь в Discord, Telegram или онлайн-игре выберите микрофон:\n"
-                "«CABLE Output (VB-Audio Point)»."
+                "«CABLE Output (VB-Audio Virtual Cable)»."
             )
         elif self.cable_poll_count > 30:
             self.cable_poll_timer.stop()
@@ -312,6 +323,10 @@ class MainWindow(QMainWindow):
             self.btn_install_cable.setText("⚡ Повторить активацию")
             self.cable_lbl.setText("⚠️ Установка не завершилась или запрос UAC был отклонен.")
             self.cable_lbl.setStyleSheet("color: #ef4444; font-size: 12px; font-weight: 500;")
+            try:
+                self._init_audio()
+            except Exception:
+                pass
 
     def _restart_as_admin(self):
         try:

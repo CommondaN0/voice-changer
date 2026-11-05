@@ -8,7 +8,6 @@ import os
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 
 from PySide6.QtWidgets import QApplication
-from PySide6.QtCore import Qt
 
 from src.audio.engine import AudioEngine
 from src.ui.main_window import MainWindow
@@ -19,13 +18,13 @@ def main():
     # Setup QApplication
     app = QApplication(sys.argv)
     app.setApplicationName("Voice Changer Pro")
-    app.setQuitOnLastWindowClosed(False) # Allows running in tray
+    app.setQuitOnLastWindowClosed(False)  # Allows running in tray
 
     # Apply initial modern Dark theme
     apply_theme(app, is_dark=True)
 
-    # Initialize low-latency audio engine
-    engine = AudioEngine(sample_rate=44100, block_size=1024)
+    # Initialize low-latency audio engine (48 kHz standard for modern Windows WASAPI)
+    engine = AudioEngine(sample_rate=48000, block_size=1024)
 
     # Launch GUI
     window = MainWindow(engine=engine, is_dark_theme=True)

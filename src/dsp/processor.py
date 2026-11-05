@@ -10,7 +10,7 @@ from src.dsp.presets import VoiceParams
 
 
 class DSPProcessor:
-    def __init__(self, sample_rate: int = 44100, chunk_size: int = 1024):
+    def __init__(self, sample_rate: int = 48000, chunk_size: int = 1024):
         self.sample_rate = sample_rate
         self.chunk_size = chunk_size
         self._lock = threading.Lock()
@@ -28,6 +28,17 @@ class DSPProcessor:
         # Audio level metering (0.0 to 1.0)
         self.input_level = 0.0
         self.output_level = 0.0
+
+    def set_sample_rate(self, sample_rate: int):
+        with self._lock:
+            if self.sample_rate == sample_rate:
+                return
+            self.sample_rate = sample_rate
+            self.noise_gate = NoiseGate(sample_rate=sample_rate)
+            self.pitch_shifter = RealtimePitchShifter(sample_rate=sample_rate, chunk_size=self.chunk_size)
+            self.equalizer = Equalizer(sample_rate=sample_rate)
+            self.robot = RingModulator(sample_rate=sample_rate)
+            self.delay = DelayEcho(sample_rate=sample_rate)
 
     def set_params(self, params: VoiceParams):
         with self._lock:

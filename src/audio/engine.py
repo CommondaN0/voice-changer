@@ -15,7 +15,7 @@ from src.dsp.presets import VoiceParams
 
 
 class AudioEngine:
-    def __init__(self, sample_rate: int = 44100, block_size: int = 1024):
+    def __init__(self, sample_rate: int = 48000, block_size: int = 1024):
         self.sample_rate = sample_rate
         self.block_size = block_size
         
@@ -49,6 +49,32 @@ class AudioEngine:
         with self._lock:
             self.test_mode_active = enabled
         self._restart_monitor_stream()
+
+    def _determine_sample_rate(self, in_id: int | None, cable_id: int | None) -> int:
+        """Determines best supported sample rate for selected WASAPI devices (default 48000)."""
+        candidates = [48000, 44100]
+        if in_id is not None:
+            try:
+                info = sd.query_devices(in_id)
+                native = int(info.get('default_samplerate', 48000))
+                if native in candidates:
+                    candidates.remove(native)
+                candidates.insert(0, native)
+            except Exception:
+                pass
+
+        for rate in candidates:
+            valid = True
+            try:
+                if in_id is not None:
+                    sd.check_input_settings(device=in_id, samplerate=rate, channels=1)
+                if cable_id is not None:
+                    sd.check_output_settings(device=cable_id, samplerate=rate, channels=2)
+            except Exception:
+                valid = False
+            if valid:
+                return rate
+        return 48000
 
     def _input_callback(self, indata, frames, time_info, status):
         """Captures microphone audio and passes through DSP processor."""
@@ -103,7 +129,7 @@ class AudioEngine:
             outdata.fill(0)
 
     def start(self, input_device_id: int | None = None, cable_output_device_id: int | None = None, headphone_device_id: int | None = None):
-        """Starts audio engine streaming."""
+        """Starts audio engine streaming with auto-negotiated sample rate."""
         self.stop()
         with self._lock:
             if input_device_id is not None:
@@ -112,6 +138,11 @@ class AudioEngine:
                 self.cable_output_device_id = cable_output_device_id
             if headphone_device_id is not None:
                 self.headphone_device_id = headphone_device_id
+
+            # Determine best sample rate for devices
+            matched_rate = self._determine_sample_rate(self.input_device_id, self.cable_output_device_id)
+            self.sample_rate = matched_rate
+            self.processor.set_sample_rate(matched_rate)
 
             try:
                 # 1. Start Input Stream (Microphone)
@@ -169,9 +200,17 @@ class AudioEngine:
 
         if self.is_running and self.test_mode_active and self.headphone_device_id is not None:
             try:
+                # Check if headphone supports the current sample_rate
+                hp_rate = self.sample_rate
+                try:
+                    sd.check_output_settings(device=self.headphone_device_id, samplerate=hp_rate, channels=2)
+                except Exception:
+                    hp_info = sd.query_devices(self.headphone_device_id)
+                    hp_rate = int(hp_info.get('default_samplerate', 48000))
+
                 self.monitor_stream = sd.OutputStream(
                     device=self.headphone_device_id,
-                    samplerate=self.sample_rate,
+                    samplerate=hp_rate,
                     blocksize=self.block_size,
                     channels=2,
                     dtype='float32',

@@ -23,15 +23,29 @@ class AudioDeviceInfo:
         return self.name
 
 
-def get_all_raw_devices():
+def refresh_devices():
+    """Forces PortAudio to re-scan Windows audio devices (clears internal cache)."""
+    try:
+        sd._terminate()
+        sd._initialize()
+    except Exception:
+        pass
+
+
+def get_all_raw_devices(force_refresh: bool = False):
+    if force_refresh:
+        refresh_devices()
     return sd.query_devices()
 
 
-def get_clean_devices(is_input: bool = True) -> List[AudioDeviceInfo]:
+def get_clean_devices(is_input: bool = True, force_refresh: bool = False) -> List[AudioDeviceInfo]:
     """
     Returns clean, deduplicated audio devices prioritizing modern Windows WASAPI.
     Eliminates messy driver internal paths and generic remappers.
     """
+    if force_refresh:
+        refresh_devices()
+
     devices = sd.query_devices()
     hostapis = sd.query_hostapis()
     default_input, default_output = sd.default.device
@@ -64,7 +78,7 @@ def get_clean_devices(is_input: bool = True) -> List[AudioDeviceInfo]:
                     hostapi_name=api_name,
                     max_input_channels=dev.get("max_input_channels", 0),
                     max_output_channels=dev.get("max_output_channels", 0),
-                    default_samplerate=dev.get("default_samplerate", 44100.0),
+                    default_samplerate=dev.get("default_samplerate", 48000.0),
                     is_default_input=(idx == default_input),
                     is_default_output=(idx == default_output),
                 ))
@@ -91,7 +105,7 @@ def get_clean_devices(is_input: bool = True) -> List[AudioDeviceInfo]:
                     hostapi_name=api_name,
                     max_input_channels=dev.get("max_input_channels", 0),
                     max_output_channels=dev.get("max_output_channels", 0),
-                    default_samplerate=dev.get("default_samplerate", 44100.0),
+                    default_samplerate=dev.get("default_samplerate", 48000.0),
                     is_default_input=(idx == default_input),
                     is_default_output=(idx == default_output),
                 ))
@@ -99,18 +113,18 @@ def get_clean_devices(is_input: bool = True) -> List[AudioDeviceInfo]:
     return clean_list
 
 
-def get_input_devices() -> List[AudioDeviceInfo]:
+def get_input_devices(force_refresh: bool = False) -> List[AudioDeviceInfo]:
     """Returns human-friendly microphone devices."""
-    return get_clean_devices(is_input=True)
+    return get_clean_devices(is_input=True, force_refresh=force_refresh)
 
 
-def get_output_devices() -> List[AudioDeviceInfo]:
+def get_output_devices(force_refresh: bool = False) -> List[AudioDeviceInfo]:
     """Returns human-friendly playback devices."""
-    return get_clean_devices(is_input=False)
+    return get_clean_devices(is_input=False, force_refresh=force_refresh)
 
 
-def find_default_device(is_input: bool = True) -> Optional[AudioDeviceInfo]:
-    devices = get_clean_devices(is_input=is_input)
+def find_default_device(is_input: bool = True, force_refresh: bool = False) -> Optional[AudioDeviceInfo]:
+    devices = get_clean_devices(is_input=is_input, force_refresh=force_refresh)
     if not devices:
         return None
     for dev in devices:
@@ -119,18 +133,18 @@ def find_default_device(is_input: bool = True) -> Optional[AudioDeviceInfo]:
     return devices[0]
 
 
-def find_virtual_cable_output() -> Optional[AudioDeviceInfo]:
+def find_virtual_cable_output(force_refresh: bool = False) -> Optional[AudioDeviceInfo]:
     """Finds VB-Audio Cable Input (which our app outputs to)."""
-    for dev in get_clean_devices(is_input=False):
+    for dev in get_clean_devices(is_input=False, force_refresh=force_refresh):
         name_lower = dev.name.lower()
         if "cable input" in name_lower or "vb-audio" in name_lower:
             return dev
     return None
 
 
-def find_virtual_cable_input() -> Optional[AudioDeviceInfo]:
+def find_virtual_cable_input(force_refresh: bool = False) -> Optional[AudioDeviceInfo]:
     """Finds VB-Audio Cable Output (which games/discord read from)."""
-    for dev in get_clean_devices(is_input=True):
+    for dev in get_clean_devices(is_input=True, force_refresh=force_refresh):
         name_lower = dev.name.lower()
         if "cable output" in name_lower or "vb-audio" in name_lower:
             return dev
