@@ -1,6 +1,9 @@
 # Documentation & Working Notes
 docs/
 
+# Inno Setup Output
+release/
+
 # Python
 __pycache__/
 *.py[cod]

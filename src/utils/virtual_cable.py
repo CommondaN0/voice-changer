@@ -34,7 +34,17 @@ SEE_MASK_NOCLOSEPROCESS = 0x00000040
 
 
 def get_driver_dir() -> str:
-    """Returns absolute path to local drivers/vbcable directory."""
+    """Returns absolute path to local drivers/vbcable directory (supports PyInstaller frozen mode)."""
+    if getattr(sys, 'frozen', False):
+        exe_dir = os.path.dirname(sys.executable)
+        candidates = [
+            os.path.join(exe_dir, "drivers", "vbcable"),
+            os.path.join(exe_dir, "_internal", "drivers", "vbcable"),
+        ]
+        for c in candidates:
+            if os.path.isdir(c):
+                return c
+        return candidates[0]
     return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "drivers", "vbcable"))
 
 
