@@ -1,6 +1,5 @@
-# Plan and Reports
-PLAN.md
-CHANGES_AND_FIXES.md
+# Documentation & Working Notes
+docs/
 
 # Python
 __pycache__/

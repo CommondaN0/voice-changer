@@ -1,6 +1,7 @@
 """
 Main Application Window for Voice Changer.
 """
+import threading
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
     QPushButton, QLabel, QTabWidget, QFrame, QMessageBox, QApplication,
@@ -19,8 +20,7 @@ from src.ui.vu_meter import VUMeter
 from src.ui.theme import apply_theme
 from src.utils.admin import is_admin, restart_as_admin
 from src.utils.virtual_cable import (
-    is_virtual_cable_installed, open_download_page, 
-    find_downloaded_setup, run_installer_from_path
+    is_virtual_cable_installed, install_driver_silent
 )
 from src.utils.tray import AppTrayIcon
 
@@ -84,14 +84,14 @@ class MainWindow(QMainWindow):
             c_layout = QHBoxLayout(self.cable_banner)
             c_layout.setContentsMargins(10, 6, 10, 6)
             
-            c_lbl = QLabel("ℹ️ Виртуальный аудиокабель не обнаружен. Установите его, чтобы голос менялся в Discord и играх.")
-            c_lbl.setStyleSheet("color: #0284c7; font-size: 12px; font-weight: 500;")
-            c_layout.addWidget(c_lbl)
+            self.cable_lbl = QLabel("ℹ️ Виртуальный аудиокабель не обнаружен. Активируйте его, чтобы голос менялся в Discord и играх.")
+            self.cable_lbl.setStyleSheet("color: #0284c7; font-size: 12px; font-weight: 500;")
+            c_layout.addWidget(self.cable_lbl)
 
-            btn_inst = QPushButton("Установить кабель в 1 клик")
-            btn_inst.setStyleSheet("background-color: #0284c7; color: white; padding: 4px 10px; font-size: 11px;")
-            btn_inst.clicked.connect(self._install_virtual_cable)
-            c_layout.addWidget(btn_inst)
+            self.btn_install_cable = QPushButton("⚡ Активировать виртуальный кабель (1 клик)")
+            self.btn_install_cable.setStyleSheet("background-color: #0284c7; color: white; padding: 5px 12px; font-size: 11px; font-weight: bold;")
+            self.btn_install_cable.clicked.connect(self._install_virtual_cable)
+            c_layout.addWidget(self.btn_install_cable)
 
             root_layout.addWidget(self.cable_banner)
 
@@ -265,26 +265,53 @@ class MainWindow(QMainWindow):
                 QMessageBox.critical(self, "Ошибка аудио", f"Не удалось применить устройства: {e}")
 
     def _install_virtual_cable(self):
-        found = find_downloaded_setup()
-        if found:
-            try:
-                run_installer_from_path(found)
-                QMessageBox.information(
-                    self, 
-                    "Установка запущена", 
-                    "В появившемся окне нажмите 'Install Driver'. После установки перезапустите приложение."
-                )
-                return
-            except Exception as e:
-                QMessageBox.critical(self, "Ошибка запуска", f"Не удалось запустить установщик: {e}")
+        if not hasattr(self, 'btn_install_cable'):
+            return
 
-        # If not found locally, open official website
-        QMessageBox.information(
-            self, 
-            "Установка виртуального кабеля", 
-            "Сейчас откроется официальная страница VB-CABLE.\n1. Скачайте архив 'VBCABLE_Driver_Pack43.zip' (или Pack45)\n2. Распакуйте архив и запустите от администратора VBCABLE_Setup_x64.exe\n(или нажмите кнопку 'Запустить установщик' в программе)."
-        )
-        open_download_page()
+        self.btn_install_cable.setEnabled(False)
+        self.btn_install_cable.setText("⏳ Установка...")
+        self.cable_lbl.setText("⏳ Установка драйвера... Пожалуйста, подтвердите системный запрос администратора (UAC).")
+        self.cable_lbl.setStyleSheet("color: #0284c7; font-size: 12px; font-weight: 600;")
+
+        threading.Thread(target=install_driver_silent, daemon=True).start()
+
+        self.cable_poll_count = 0
+        self.cable_poll_timer = QTimer(self)
+        self.cable_poll_timer.timeout.connect(self._poll_cable_installation)
+        self.cable_poll_timer.start(1200)
+
+    def _poll_cable_installation(self):
+        self.cable_poll_count += 1
+        if is_virtual_cable_installed():
+            self.cable_poll_timer.stop()
+            if hasattr(self, 'cable_banner') and self.cable_banner is not None:
+                self.cable_banner.hide()
+
+            cable_dev = find_virtual_cable_output()
+            if cable_dev is not None:
+                self.engine.cable_output_device_id = cable_dev.index
+                try:
+                    self.engine.start(
+                        input_device_id=self.engine.input_device_id,
+                        cable_output_device_id=cable_dev.index,
+                        headphone_device_id=self.engine.headphone_device_id
+                    )
+                except Exception:
+                    pass
+
+            QMessageBox.information(
+                self,
+                "Успех",
+                "Виртуальный аудиокабель успешно активирован и подключен!\n\n"
+                "Теперь в Discord, Telegram или онлайн-игре выберите микрофон:\n"
+                "«CABLE Output (VB-Audio Point)»."
+            )
+        elif self.cable_poll_count > 30:
+            self.cable_poll_timer.stop()
+            self.btn_install_cable.setEnabled(True)
+            self.btn_install_cable.setText("⚡ Повторить активацию")
+            self.cable_lbl.setText("⚠️ Установка не завершилась или запрос UAC был отклонен.")
+            self.cable_lbl.setStyleSheet("color: #ef4444; font-size: 12px; font-weight: 500;")
 
     def _restart_as_admin(self):
         try:

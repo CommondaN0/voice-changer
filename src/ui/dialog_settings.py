@@ -1,15 +1,14 @@
 """
 Simplified and clear Audio settings dialog.
 """
+import threading
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QGridLayout, 
-    QLabel, QComboBox, QPushButton, QGroupBox, QMessageBox, QFileDialog
+    QLabel, QComboBox, QPushButton, QGroupBox, QMessageBox
 )
+from PySide6.QtCore import QTimer
 from src.audio.devices import get_input_devices, get_output_devices, find_virtual_cable_output
-from src.utils.virtual_cable import (
-    is_virtual_cable_installed, open_download_page, 
-    find_downloaded_setup, run_installer_from_path
-)
+from src.utils.virtual_cable import is_virtual_cable_installed, install_driver_silent
 
 
 class SettingsDialog(QDialog):
@@ -48,38 +47,24 @@ class SettingsDialog(QDialog):
 
         # 2. Virtual Cable Status & Setup
         cable_group = QGroupBox("2. Виртуальное устройство (для Discord и игр)")
-        cable_layout = QVBoxLayout(cable_group)
-        cable_layout.setSpacing(8)
+        self.cable_group_layout = QVBoxLayout(cable_group)
+        self.cable_group_layout.setSpacing(8)
         
         cable_dev = find_virtual_cable_output()
         if cable_dev is not None:
             self.cable_id = cable_dev.index
             lbl_status = QLabel("✅ Виртуальный кабель найден и активен!\nВ Discord или игре выберите микрофон: «CABLE Output».")
             lbl_status.setStyleSheet("color: #22c55e; font-weight: 600;")
-            cable_layout.addWidget(lbl_status)
+            self.cable_group_layout.addWidget(lbl_status)
         else:
-            lbl_status = QLabel("❌ Виртуальный кабель не установлен.\nОн необходим, чтобы ваш измененный голос слышали другие игроки.")
-            lbl_status.setStyleSheet("color: #ef4444; font-weight: 500;")
-            cable_layout.addWidget(lbl_status)
+            self.lbl_cable_status = QLabel("❌ Виртуальный кабель не установлен.\nОн необходим, чтобы ваш измененный голос слышали другие игроки.")
+            self.lbl_cable_status.setStyleSheet("color: #ef4444; font-weight: 500;")
+            self.cable_group_layout.addWidget(self.lbl_cable_status)
 
-            btn_box = QHBoxLayout()
-            btn_open_site = QPushButton("🌐 Открыть сайт VB-CABLE")
-            btn_open_site.setStyleSheet("background-color: #0284c7; color: white;")
-            btn_open_site.clicked.connect(open_download_page)
-            btn_box.addWidget(btn_open_site)
-
-            found_setup = find_downloaded_setup()
-            if found_setup:
-                btn_run_found = QPushButton("⚡ Запустить найденный установщик")
-                btn_run_found.setStyleSheet("background-color: #10b981; color: white; font-weight: 700;")
-                btn_run_found.clicked.connect(lambda: self._launch_installer(found_setup))
-                btn_box.addWidget(btn_run_found)
-
-            btn_browse = QPushButton("📁 Выбрать ZIP вручную")
-            btn_browse.clicked.connect(self._browse_installer)
-            btn_box.addWidget(btn_browse)
-
-            cable_layout.addLayout(btn_box)
+            self.btn_install_cable = QPushButton("⚡ Активировать виртуальный кабель (1 клик)")
+            self.btn_install_cable.setStyleSheet("background-color: #0284c7; color: white; font-weight: 700; padding: 7px;")
+            self.btn_install_cable.clicked.connect(self._install_cable)
+            self.cable_group_layout.addWidget(self.btn_install_cable)
         
         layout.addWidget(cable_group)
 
@@ -132,26 +117,40 @@ class SettingsDialog(QDialog):
 
         layout.addLayout(btn_layout)
 
-    def _launch_installer(self, path: str):
-        try:
-            run_installer_from_path(path)
+    def _install_cable(self):
+        self.btn_install_cable.setEnabled(False)
+        self.btn_install_cable.setText("⏳ Идет активация...")
+        self.lbl_cable_status.setText("⏳ Установка драйвера... Пожалуйста, подтвердите системный запрос Windows (UAC).")
+        self.lbl_cable_status.setStyleSheet("color: #0284c7; font-weight: 500;")
+
+        threading.Thread(target=install_driver_silent, daemon=True).start()
+
+        self.poll_count = 0
+        self.poll_timer = QTimer(self)
+        self.poll_timer.timeout.connect(self._check_installed)
+        self.poll_timer.start(1200)
+
+    def _check_installed(self):
+        self.poll_count += 1
+        if is_virtual_cable_installed():
+            self.poll_timer.stop()
+            self.btn_install_cable.hide()
+            self.lbl_cable_status.setText("✅ Виртуальный кабель успешно активирован!\nВ Discord или игре выберите микрофон: «CABLE Output».")
+            self.lbl_cable_status.setStyleSheet("color: #22c55e; font-weight: 600;")
+            cable_dev = find_virtual_cable_output()
+            if cable_dev:
+                self.cable_id = cable_dev.index
             QMessageBox.information(
                 self, 
-                "Установка запущена", 
-                "В открывшемся окне установщика нажмите кнопку 'Install Driver'.\nПосле завершения перезапустите программу."
+                "Успех", 
+                "Виртуальный аудиокабель готов к работе!"
             )
-        except Exception as e:
-            QMessageBox.critical(self, "Ошибка запуска", f"Не удалось запустить установщик: {e}")
-
-    def _browse_installer(self):
-        file_path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Выберите скачанный архив или установщик VB-CABLE",
-            "",
-            "Архивы и программы (*.zip *.exe);;Все файлы (*.*)"
-        )
-        if file_path:
-            self._launch_installer(file_path)
+        elif self.poll_count > 30:
+            self.poll_timer.stop()
+            self.btn_install_cable.setEnabled(True)
+            self.btn_install_cable.setText("⚡ Повторить активацию")
+            self.lbl_cable_status.setText("⚠️ Установка не завершилась или запрос UAC был отклонен.")
+            self.lbl_cable_status.setStyleSheet("color: #ef4444; font-weight: 500;")
 
     def _save_and_apply(self):
         self.input_id = self.mic_combo.currentData()
